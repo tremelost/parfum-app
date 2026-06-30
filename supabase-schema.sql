@@ -31,3 +31,36 @@ on public.pembelian_manual
 for delete
 to anon
 using (true);
+
+create table if not exists public.penjualan_manual (
+  id uuid primary key default gen_random_uuid(),
+  tanggal date not null,
+  item text not null,
+  harga numeric(12, 2) not null default 0,
+  qty integer not null default 1,
+  created_at timestamptz not null default now()
+);
+
+alter table public.penjualan_manual enable row level security;
+
+drop policy if exists "Allow public read penjualan manual" on public.penjualan_manual;
+drop policy if exists "Allow public insert penjualan manual" on public.penjualan_manual;
+drop policy if exists "Allow public delete penjualan manual" on public.penjualan_manual;
+
+create policy "Allow public read penjualan manual"
+on public.penjualan_manual
+for select
+to anon
+using (true);
+
+create policy "Allow public insert penjualan manual"
+on public.penjualan_manual
+for insert
+to anon
+with check (true);
+
+create policy "Allow public delete penjualan manual"
+on public.penjualan_manual
+for delete
+to anon
+using (true);

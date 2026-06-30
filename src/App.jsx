@@ -10,16 +10,20 @@ import {
   Plus,
   RefreshCcw,
   Search,
+  ShoppingCart,
   Trash2,
   WalletCards,
 } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 
-const TABLE_NAME = 'pembelian_manual'
+const PURCHASE_TABLE = 'pembelian_manual'
+const SALES_TABLE = 'penjualan_manual'
+
+const today = new Date().toISOString().slice(0, 10)
 
 const initialPurchases = [
   {
-    id: 'demo-1',
+    id: 'demo-buy-1',
     tanggal: '2026-07-01',
     kategori: 'EDP',
     item: 'Aroma Vanilla Oud 50ml',
@@ -27,7 +31,7 @@ const initialPurchases = [
     qty: 12,
   },
   {
-    id: 'demo-2',
+    id: 'demo-buy-2',
     tanggal: '2026-07-01',
     kategori: 'Botol',
     item: 'Botol kaca 50ml',
@@ -35,7 +39,7 @@ const initialPurchases = [
     qty: 40,
   },
   {
-    id: 'demo-3',
+    id: 'demo-buy-3',
     tanggal: '2026-06-30',
     kategori: 'EDT',
     item: 'Fresh Citrus 30ml',
@@ -43,7 +47,7 @@ const initialPurchases = [
     qty: 9,
   },
   {
-    id: 'demo-4',
+    id: 'demo-buy-4',
     tanggal: '2026-06-29',
     kategori: 'Packaging',
     item: 'Box parfum premium',
@@ -52,9 +56,33 @@ const initialPurchases = [
   },
 ]
 
-const emptyForm = {
-  tanggal: new Date().toISOString().slice(0, 10),
+const initialSales = [
+  {
+    id: 'demo-sale-1',
+    tanggal: '2026-07-01',
+    item: 'Aroma Vanilla Oud 50ml',
+    harga: 125000,
+    qty: 3,
+  },
+  {
+    id: 'demo-sale-2',
+    tanggal: '2026-06-30',
+    item: 'Fresh Citrus 30ml',
+    harga: 78000,
+    qty: 2,
+  },
+]
+
+const emptyPurchaseForm = {
+  tanggal: today,
   kategori: 'EDP',
+  item: '',
+  harga: '',
+  qty: 1,
+}
+
+const emptySaleForm = {
+  tanggal: today,
   item: '',
   harga: '',
   qty: 1,
@@ -64,6 +92,7 @@ const tabs = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'stock', label: 'Stock', icon: Boxes },
   { id: 'purchases', label: 'Pembelian', icon: ClipboardList },
+  { id: 'sales', label: 'Penjualan', icon: ShoppingCart },
 ]
 
 function formatCurrency(value) {
@@ -82,68 +111,92 @@ function formatDate(value) {
   }).format(new Date(value))
 }
 
-function getLocalPurchases() {
+function getLocalRows(key, fallbackRows) {
   try {
-    const saved = localStorage.getItem('parfum-purchases')
-    return saved ? JSON.parse(saved) : initialPurchases
+    const saved = localStorage.getItem(key)
+    return saved ? JSON.parse(saved) : fallbackRows
   } catch {
-    return initialPurchases
+    return fallbackRows
   }
 }
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [purchases, setPurchases] = useState([])
-  const [form, setForm] = useState(emptyForm)
+  const [sales, setSales] = useState([])
+  const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm)
+  const [saleForm, setSaleForm] = useState(emptySaleForm)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [savingPurchase, setSavingPurchase] = useState(false)
+  const [savingSale, setSavingSale] = useState(false)
   const [notice, setNotice] = useState('')
 
-  const loadPurchases = async () => {
+  const loadData = async () => {
     setLoading(true)
     setNotice('')
 
     if (!isSupabaseConfigured) {
-      const localPurchases = getLocalPurchases()
-      setPurchases(localPurchases)
+      setPurchases(getLocalRows('parfum-purchases', initialPurchases))
+      setSales(getLocalRows('parfum-sales', initialSales))
       setNotice('Mode demo aktif. Isi .env untuk menyambungkan Supabase.')
       setLoading(false)
       return
     }
 
-    const { data, error } = await supabase
-      .from(TABLE_NAME)
-      .select('id,tanggal,kategori,item,harga,qty')
-      .order('tanggal', { ascending: false })
+    const [purchaseResult, saleResult] = await Promise.all([
+      supabase
+        .from(PURCHASE_TABLE)
+        .select('id,tanggal,kategori,item,harga,qty')
+        .order('tanggal', { ascending: false }),
+      supabase
+        .from(SALES_TABLE)
+        .select('id,tanggal,item,harga,qty')
+        .order('tanggal', { ascending: false }),
+    ])
 
-    if (error) {
-      setNotice(error.message)
+    if (purchaseResult.error || saleResult.error) {
+      setNotice(
+        purchaseResult.error?.message ??
+          saleResult.error?.message ??
+          'Gagal memuat data.',
+      )
     } else {
-      setPurchases(data ?? [])
+      setPurchases(purchaseResult.data ?? [])
+      setSales(saleResult.data ?? [])
     }
 
     setLoading(false)
   }
 
   useEffect(() => {
-    loadPurchases()
+    loadData()
   }, [])
 
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined
 
-    const channel = supabase
+    const purchaseChannel = supabase
       .channel('realtime-pembelian-manual')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: TABLE_NAME },
-        loadPurchases,
+        { event: '*', schema: 'public', table: PURCHASE_TABLE },
+        loadData,
+      )
+      .subscribe()
+
+    const salesChannel = supabase
+      .channel('realtime-penjualan-manual')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: SALES_TABLE },
+        loadData,
       )
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channel)
+      supabase.removeChannel(purchaseChannel)
+      supabase.removeChannel(salesChannel)
     }
   }, [])
 
@@ -152,6 +205,12 @@ function App() {
       localStorage.setItem('parfum-purchases', JSON.stringify(purchases))
     }
   }, [purchases])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured && sales.length > 0) {
+      localStorage.setItem('parfum-sales', JSON.stringify(sales))
+    }
+  }, [sales])
 
   const filteredPurchases = useMemo(() => {
     const keyword = search.trim().toLowerCase()
@@ -165,14 +224,24 @@ function App() {
     )
   }, [purchases, search])
 
+  const filteredSales = useMemo(() => {
+    const keyword = search.trim().toLowerCase()
+    if (!keyword) return sales
+
+    return sales.filter((sale) =>
+      [sale.tanggal, sale.item].join(' ').toLowerCase().includes(keyword),
+    )
+  }, [sales, search])
+
   const stockRows = useMemo(() => {
     const grouped = new Map()
 
     purchases.forEach((purchase) => {
-      const key = `${purchase.kategori}-${purchase.item}`
-      const current = grouped.get(key) ?? {
+      const current = grouped.get(purchase.item) ?? {
         kategori: purchase.kategori,
         item: purchase.item,
+        masuk: 0,
+        keluar: 0,
         qty: 0,
         total: 0,
         hargaRataRata: 0,
@@ -181,14 +250,31 @@ function App() {
       const qty = Number(purchase.qty) || 0
       const total = (Number(purchase.harga) || 0) * qty
 
-      current.qty += qty
+      current.masuk += qty
       current.total += total
-      current.hargaRataRata = current.qty ? current.total / current.qty : 0
-      grouped.set(key, current)
+      current.hargaRataRata = current.masuk ? current.total / current.masuk : 0
+      current.qty = current.masuk - current.keluar
+      grouped.set(purchase.item, current)
+    })
+
+    sales.forEach((sale) => {
+      const current = grouped.get(sale.item) ?? {
+        kategori: '-',
+        item: sale.item,
+        masuk: 0,
+        keluar: 0,
+        qty: 0,
+        total: 0,
+        hargaRataRata: 0,
+      }
+
+      current.keluar += Number(sale.qty) || 0
+      current.qty = current.masuk - current.keluar
+      grouped.set(sale.item, current)
     })
 
     return [...grouped.values()].sort((a, b) => b.qty - a.qty)
-  }, [purchases])
+  }, [purchases, sales])
 
   const stats = useMemo(() => {
     const totalBelanja = purchases.reduce(
@@ -196,37 +282,48 @@ function App() {
         sum + (Number(purchase.harga) || 0) * (Number(purchase.qty) || 0),
       0,
     )
-    const totalQty = purchases.reduce(
+    const totalPenjualan = sales.reduce(
+      (sum, sale) => sum + (Number(sale.harga) || 0) * (Number(sale.qty) || 0),
+      0,
+    )
+    const totalQtyMasuk = purchases.reduce(
       (sum, purchase) => sum + (Number(purchase.qty) || 0),
+      0,
+    )
+    const totalQtyTerjual = sales.reduce(
+      (sum, sale) => sum + (Number(sale.qty) || 0),
       0,
     )
 
     return {
       totalBelanja,
-      totalQty,
+      totalPenjualan,
+      totalQtyMasuk,
+      totalQtyTerjual,
       totalItem: stockRows.length,
-      transaksi: purchases.length,
+      transaksi: purchases.length + sales.length,
     }
-  }, [purchases, stockRows.length])
+  }, [purchases, sales, stockRows.length])
 
-  const recentRows = filteredPurchases.slice(0, 6)
+  const recentPurchases = filteredPurchases.slice(0, 6)
+  const recentSales = filteredSales.slice(0, 6)
 
-  const handleSubmit = async (event) => {
+  const handlePurchaseSubmit = async (event) => {
     event.preventDefault()
-    setSaving(true)
+    setSavingPurchase(true)
     setNotice('')
 
     const payload = {
-      tanggal: form.tanggal,
-      kategori: form.kategori.trim(),
-      item: form.item.trim(),
-      harga: Number(form.harga),
-      qty: Number(form.qty),
+      tanggal: purchaseForm.tanggal,
+      kategori: purchaseForm.kategori.trim(),
+      item: purchaseForm.item.trim(),
+      harga: Number(purchaseForm.harga),
+      qty: Number(purchaseForm.qty),
     }
 
     if (!payload.item || !payload.kategori || payload.harga < 0 || payload.qty < 1) {
-      setNotice('Lengkapi item, kategori, harga, dan qty dengan benar.')
-      setSaving(false)
+      setNotice('Lengkapi item, kategori, harga, dan qty pembelian dengan benar.')
+      setSavingPurchase(false)
       return
     }
 
@@ -235,21 +332,58 @@ function App() {
         { ...payload, id: crypto.randomUUID() },
         ...current,
       ])
-      setForm(emptyForm)
-      setSaving(false)
+      setPurchaseForm(emptyPurchaseForm)
+      setSavingPurchase(false)
       return
     }
 
-    const { error } = await supabase.from(TABLE_NAME).insert(payload)
+    const { error } = await supabase.from(PURCHASE_TABLE).insert(payload)
 
     if (error) {
       setNotice(error.message)
     } else {
-      setForm(emptyForm)
-      await loadPurchases()
+      setPurchaseForm(emptyPurchaseForm)
+      await loadData()
     }
 
-    setSaving(false)
+    setSavingPurchase(false)
+  }
+
+  const handleSaleSubmit = async (event) => {
+    event.preventDefault()
+    setSavingSale(true)
+    setNotice('')
+
+    const payload = {
+      tanggal: saleForm.tanggal,
+      item: saleForm.item.trim(),
+      harga: Number(saleForm.harga),
+      qty: Number(saleForm.qty),
+    }
+
+    if (!payload.item || payload.harga < 0 || payload.qty < 1) {
+      setNotice('Lengkapi tanggal, item, harga, dan qty penjualan dengan benar.')
+      setSavingSale(false)
+      return
+    }
+
+    if (!isSupabaseConfigured) {
+      setSales((current) => [{ ...payload, id: crypto.randomUUID() }, ...current])
+      setSaleForm(emptySaleForm)
+      setSavingSale(false)
+      return
+    }
+
+    const { error } = await supabase.from(SALES_TABLE).insert(payload)
+
+    if (error) {
+      setNotice(error.message)
+    } else {
+      setSaleForm(emptySaleForm)
+      await loadData()
+    }
+
+    setSavingSale(false)
   }
 
   const deletePurchase = async (id) => {
@@ -258,11 +392,25 @@ function App() {
       return
     }
 
-    const { error } = await supabase.from(TABLE_NAME).delete().eq('id', id)
+    const { error } = await supabase.from(PURCHASE_TABLE).delete().eq('id', id)
     if (error) {
       setNotice(error.message)
     } else {
-      await loadPurchases()
+      await loadData()
+    }
+  }
+
+  const deleteSale = async (id) => {
+    if (!isSupabaseConfigured) {
+      setSales((current) => current.filter((sale) => sale.id !== id))
+      return
+    }
+
+    const { error } = await supabase.from(SALES_TABLE).delete().eq('id', id)
+    if (error) {
+      setNotice(error.message)
+    } else {
+      await loadData()
     }
   }
 
@@ -305,7 +453,7 @@ function App() {
               {isSupabaseConfigured ? 'Supabase tersambung' : 'Mode demo lokal'}
             </p>
             <p className="mt-1 text-xs leading-5 text-slate-500">
-              Realtime stock dihitung dari tabel pembelian manual.
+              Stock dihitung dari pembelian dikurangi penjualan.
             </p>
           </div>
         </div>
@@ -335,7 +483,7 @@ function App() {
               </div>
               <button
                 type="button"
-                onClick={loadPurchases}
+                onClick={loadData}
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
               >
                 <RefreshCcw size={16} />
@@ -344,20 +492,20 @@ function App() {
             </div>
           </div>
 
-          <nav className="mt-4 grid grid-cols-3 gap-2 lg:hidden">
+          <nav className="mt-4 grid grid-cols-4 gap-2 lg:hidden">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex h-10 items-center justify-center gap-2 rounded-md text-xs font-semibold transition ${
+                className={`flex h-10 items-center justify-center gap-1 rounded-md text-xs font-semibold transition sm:gap-2 ${
                   activeTab === tab.id
                     ? 'bg-slate-950 text-white'
                     : 'border border-slate-200 bg-white text-slate-600'
                 }`}
               >
                 <tab.icon size={16} />
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
               </button>
             ))}
           </nav>
@@ -375,7 +523,8 @@ function App() {
             <DashboardView
               stats={stats}
               stockRows={stockRows}
-              recentRows={recentRows}
+              recentPurchases={recentPurchases}
+              recentSales={recentSales}
               loading={loading}
             />
           )}
@@ -386,13 +535,25 @@ function App() {
 
           {activeTab === 'purchases' && (
             <PurchaseView
-              form={form}
-              setForm={setForm}
+              form={purchaseForm}
+              setForm={setPurchaseForm}
               rows={filteredPurchases}
-              saving={saving}
+              saving={savingPurchase}
               loading={loading}
-              onSubmit={handleSubmit}
+              onSubmit={handlePurchaseSubmit}
               onDelete={deletePurchase}
+            />
+          )}
+
+          {activeTab === 'sales' && (
+            <SalesView
+              form={saleForm}
+              setForm={setSaleForm}
+              rows={filteredSales}
+              saving={savingSale}
+              loading={loading}
+              onSubmit={handleSaleSubmit}
+              onDelete={deleteSale}
             />
           )}
         </div>
@@ -417,7 +578,7 @@ function StatCard({ title, value, icon: Icon, tone }) {
   )
 }
 
-function DashboardView({ stats, stockRows, recentRows, loading }) {
+function DashboardView({ stats, stockRows, recentPurchases, recentSales, loading }) {
   return (
     <div className="grid gap-6">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -428,39 +589,41 @@ function DashboardView({ stats, stockRows, recentRows, loading }) {
           tone="bg-emerald-100 text-emerald-700"
         />
         <StatCard
-          title="Total qty masuk"
-          value={stats.totalQty}
-          icon={Boxes}
+          title="Total penjualan"
+          value={formatCurrency(stats.totalPenjualan)}
+          icon={ShoppingCart}
           tone="bg-sky-100 text-sky-700"
         />
         <StatCard
-          title="Jenis item"
-          value={stats.totalItem}
+          title="Qty terjual"
+          value={stats.totalQtyTerjual}
           icon={BarChart3}
           tone="bg-violet-100 text-violet-700"
         />
         <StatCard
-          title="Transaksi manual"
+          title="Transaksi"
           value={stats.transaksi}
           icon={ClipboardList}
           tone="bg-amber-100 text-amber-700"
         />
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <Panel title="Stock paling banyak" subtitle="Akumulasi qty dari pembelian">
+      <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+        <Panel title="Stock paling banyak" subtitle="Pembelian dikurangi penjualan">
           <DataState loading={loading} empty={!stockRows.length}>
             <div className="grid gap-3">
               {stockRows.slice(0, 5).map((row) => (
                 <div
-                  key={`${row.kategori}-${row.item}`}
+                  key={row.item}
                   className="grid grid-cols-[1fr_auto] items-center gap-4 rounded-md border border-slate-200 p-3"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-950">
                       {row.item}
                     </p>
-                    <p className="text-xs text-slate-500">{row.kategori}</p>
+                    <p className="text-xs text-slate-500">
+                      Masuk {row.masuk} pcs, keluar {row.keluar} pcs
+                    </p>
                   </div>
                   <div className="text-right">
                     <p className="text-lg font-bold text-slate-950">{row.qty}</p>
@@ -472,17 +635,21 @@ function DashboardView({ stats, stockRows, recentRows, loading }) {
           </DataState>
         </Panel>
 
-        <Panel title="Pembelian terbaru" subtitle="Data manual terakhir masuk">
-          <PurchaseTable rows={recentRows} loading={loading} compact />
+        <Panel title="Penjualan terbaru" subtitle="Data manual terakhir masuk">
+          <SaleTable rows={recentSales} loading={loading} compact />
         </Panel>
       </section>
+
+      <Panel title="Pembelian terbaru" subtitle="Data belanja manual terakhir masuk">
+        <PurchaseTable rows={recentPurchases} loading={loading} compact />
+      </Panel>
     </div>
   )
 }
 
 function StockView({ stockRows, loading }) {
   return (
-    <Panel title="Realtime stock" subtitle="Dihitung otomatis dari data pembelian manual">
+    <Panel title="Realtime stock" subtitle="Dihitung otomatis dari pembelian dan penjualan">
       <DataState loading={loading} empty={!stockRows.length}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
@@ -490,21 +657,33 @@ function StockView({ stockRows, loading }) {
               <tr>
                 <th className="py-3 pr-4 font-semibold">Kategori</th>
                 <th className="py-3 pr-4 font-semibold">Item</th>
-                <th className="py-3 pr-4 text-right font-semibold">Qty</th>
+                <th className="py-3 pr-4 text-right font-semibold">Masuk</th>
+                <th className="py-3 pr-4 text-right font-semibold">Keluar</th>
+                <th className="py-3 pr-4 text-right font-semibold">Stock</th>
                 <th className="py-3 pr-4 text-right font-semibold">Harga rata-rata</th>
                 <th className="py-3 text-right font-semibold">Nilai stock</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {stockRows.map((row) => (
-                <tr key={`${row.kategori}-${row.item}`}>
+                <tr key={row.item}>
                   <td className="py-3 pr-4 text-slate-600">{row.kategori}</td>
                   <td className="py-3 pr-4 font-medium text-slate-950">{row.item}</td>
-                  <td className="py-3 pr-4 text-right font-semibold">{row.qty}</td>
+                  <td className="py-3 pr-4 text-right">{row.masuk}</td>
+                  <td className="py-3 pr-4 text-right">{row.keluar}</td>
+                  <td
+                    className={`py-3 pr-4 text-right font-semibold ${
+                      row.qty < 0 ? 'text-red-600' : 'text-slate-950'
+                    }`}
+                  >
+                    {row.qty}
+                  </td>
                   <td className="py-3 pr-4 text-right">
                     {formatCurrency(row.hargaRataRata)}
                   </td>
-                  <td className="py-3 text-right">{formatCurrency(row.total)}</td>
+                  <td className="py-3 text-right">
+                    {formatCurrency(row.hargaRataRata * row.qty)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -532,15 +711,7 @@ function PurchaseView({
     <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
       <Panel title="Input pembelian" subtitle="Catat belanja manual supplier">
         <form className="grid gap-4" onSubmit={onSubmit}>
-          <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-            Tanggal
-            <input
-              type="date"
-              value={form.tanggal}
-              onChange={(event) => updateForm('tanggal', event.target.value)}
-              className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
-            />
-          </label>
+          <DateField value={form.tanggal} onChange={(value) => updateForm('tanggal', value)} />
 
           <label className="grid gap-1.5 text-sm font-medium text-slate-700">
             Kategori
@@ -558,49 +729,21 @@ function PurchaseView({
             </select>
           </label>
 
-          <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-            Item
-            <input
-              value={form.item}
-              onChange={(event) => updateForm('item', event.target.value)}
-              placeholder="Nama parfum atau bahan"
-              className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
-            />
-          </label>
+          <TextField
+            label="Item"
+            value={form.item}
+            onChange={(value) => updateForm('item', value)}
+            placeholder="Nama parfum atau bahan"
+          />
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-              Harga
-              <input
-                type="number"
-                min="0"
-                value={form.harga}
-                onChange={(event) => updateForm('harga', event.target.value)}
-                placeholder="85000"
-                className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
-              />
-            </label>
+          <NumberPair
+            harga={form.harga}
+            qty={form.qty}
+            onHargaChange={(value) => updateForm('harga', value)}
+            onQtyChange={(value) => updateForm('qty', value)}
+          />
 
-            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-              Qty
-              <input
-                type="number"
-                min="1"
-                value={form.qty}
-                onChange={(event) => updateForm('qty', event.target.value)}
-                className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
-              />
-            </label>
-          </div>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-teal-600 px-4 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Plus size={17} />
-            {saving ? 'Menyimpan...' : 'Simpan pembelian'}
-          </button>
+          <SubmitButton saving={saving} label="Simpan pembelian" />
         </form>
       </Panel>
 
@@ -608,6 +751,109 @@ function PurchaseView({
         <PurchaseTable rows={rows} loading={loading} onDelete={onDelete} />
       </Panel>
     </div>
+  )
+}
+
+function SalesView({ form, setForm, rows, saving, loading, onSubmit, onDelete }) {
+  const updateForm = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
+      <Panel title="Input penjualan" subtitle="Catat penjualan manual customer">
+        <form className="grid gap-4" onSubmit={onSubmit}>
+          <DateField value={form.tanggal} onChange={(value) => updateForm('tanggal', value)} />
+          <TextField
+            label="Item"
+            value={form.item}
+            onChange={(value) => updateForm('item', value)}
+            placeholder="Nama parfum yang terjual"
+          />
+          <NumberPair
+            harga={form.harga}
+            qty={form.qty}
+            onHargaChange={(value) => updateForm('harga', value)}
+            onQtyChange={(value) => updateForm('qty', value)}
+          />
+          <SubmitButton saving={saving} label="Simpan penjualan" />
+        </form>
+      </Panel>
+
+      <Panel title="Data penjualan" subtitle="Database: id, tanggal, item, harga, qty">
+        <SaleTable rows={rows} loading={loading} onDelete={onDelete} />
+      </Panel>
+    </div>
+  )
+}
+
+function DateField({ value, onChange }) {
+  return (
+    <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+      Tanggal
+      <input
+        type="date"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
+      />
+    </label>
+  )
+}
+
+function TextField({ label, value, onChange, placeholder }) {
+  return (
+    <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+      {label}
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
+      />
+    </label>
+  )
+}
+
+function NumberPair({ harga, qty, onHargaChange, onQtyChange }) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+      <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+        Harga
+        <input
+          type="number"
+          min="0"
+          value={harga}
+          onChange={(event) => onHargaChange(event.target.value)}
+          placeholder="85000"
+          className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
+        />
+      </label>
+
+      <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+        Qty
+        <input
+          type="number"
+          min="1"
+          value={qty}
+          onChange={(event) => onQtyChange(event.target.value)}
+          className="h-10 rounded-md border border-slate-200 px-3 outline-none ring-teal-600/20 focus:border-teal-600 focus:ring-4"
+        />
+      </label>
+    </div>
+  )
+}
+
+function SubmitButton({ saving, label }) {
+  return (
+    <button
+      type="submit"
+      disabled={saving}
+      className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-teal-600 px-4 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      <Plus size={17} />
+      {saving ? 'Menyimpan...' : label}
+    </button>
   )
 }
 
@@ -687,25 +933,78 @@ function PurchaseTable({ rows, loading, onDelete, compact = false }) {
                     {formatCurrency(Number(row.harga) * Number(row.qty))}
                   </td>
                 )}
-                {onDelete && (
-                  <td className="py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => onDelete(row.id)}
-                      className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-                      aria-label={`Hapus ${row.item}`}
-                      title="Hapus"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                )}
+                {onDelete && <DeleteCell row={row} onDelete={onDelete} />}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </DataState>
+  )
+}
+
+function SaleTable({ rows, loading, onDelete, compact = false }) {
+  return (
+    <DataState loading={loading} empty={!rows.length}>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="py-3 pr-4 font-semibold">Tanggal</th>
+              <th className="py-3 pr-4 font-semibold">Item</th>
+              {!compact && (
+                <th className="py-3 pr-4 text-right font-semibold">Harga</th>
+              )}
+              <th className="py-3 pr-4 text-right font-semibold">Qty</th>
+              {!compact && (
+                <th className="py-3 pr-4 text-right font-semibold">Total</th>
+              )}
+              {onDelete && <th className="py-3 text-right font-semibold">Aksi</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td className="whitespace-nowrap py-3 pr-4 text-slate-600">
+                  {formatDate(row.tanggal)}
+                </td>
+                <td className="min-w-48 py-3 pr-4 font-medium text-slate-950">
+                  {row.item}
+                </td>
+                {!compact && (
+                  <td className="py-3 pr-4 text-right">
+                    {formatCurrency(row.harga)}
+                  </td>
+                )}
+                <td className="py-3 pr-4 text-right font-semibold">{row.qty}</td>
+                {!compact && (
+                  <td className="py-3 pr-4 text-right">
+                    {formatCurrency(Number(row.harga) * Number(row.qty))}
+                  </td>
+                )}
+                {onDelete && <DeleteCell row={row} onDelete={onDelete} />}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </DataState>
+  )
+}
+
+function DeleteCell({ row, onDelete }) {
+  return (
+    <td className="py-3 text-right">
+      <button
+        type="button"
+        onClick={() => onDelete(row.id)}
+        className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+        aria-label={`Hapus ${row.item}`}
+        title="Hapus"
+      >
+        <Trash2 size={16} />
+      </button>
+    </td>
   )
 }
 
