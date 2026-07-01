@@ -3,7 +3,6 @@ import {
   AlertCircle,
   Boxes,
   ClipboardList,
-  Database,
   LayoutDashboard,
   LogOut,
   RefreshCcw,
@@ -12,6 +11,7 @@ import {
 } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import useParfumData from '../hooks/useParfumData'
+import sabiLogo from '../assets/sabi.png'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -51,14 +51,12 @@ export default function Layout() {
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-slate-200 bg-white lg:block">
         <div className="flex h-full flex-col px-5 py-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-teal-600 text-white">
-              <Database size={20} />
-            </div>
+            <img src={sabiLogo} alt="Sabi Logo" className="size-10 object-contain" />
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
                 Admin
               </p>
-              <h1 className="text-xl font-bold">Parfum Stock</h1>
+              <h1 className="text-xl font-bold">Regarance</h1>
             </div>
           </div>
 

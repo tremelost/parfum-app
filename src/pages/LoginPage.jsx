@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Database, LogIn, UserPlus } from 'lucide-react'
+import { LogIn, UserPlus } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import sabiLogo from '../assets/sabi.png'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -69,14 +70,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex size-14 items-center justify-center rounded-xl bg-teal-600 text-white shadow-lg shadow-teal-600/25">
-            <Database size={28} />
-          </div>
+          <img src={sabiLogo} alt="Sabi Logo" className="size-16 object-contain" />
           <div className="text-center">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
               Admin
             </p>
-            <h1 className="text-2xl font-bold text-slate-950">Parfum Stock</h1>
+            <h1 className="text-2xl font-bold text-slate-950">Regarance</h1>
           </div>
         </div>
 

@@ -45,7 +45,7 @@ export default function InvoiceModal({ row, onClose }) {
         <div className="print-content" id="invoice-content">
           <div className="mb-8 border-b-2 border-slate-200 pb-6 text-center">
             <h1 className="text-3xl font-black uppercase tracking-widest text-teal-700">INVOICE</h1>
-            <p className="mt-2 text-sm text-slate-500">Parfum Stock Admin</p>
+            <p className="mt-2 text-sm text-slate-500">Regarance Admin</p>
           </div>
 
           <div className="mb-8 flex justify-between text-sm">
